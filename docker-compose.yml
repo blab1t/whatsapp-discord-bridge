@@ -1,0 +1,11 @@
+services:
+  bridge:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+    # Needed to scan the login QR from the terminal on first run:
+    #   docker compose up      (not -d, so you can see the QR)
+    stdin_open: true
+    tty: true
