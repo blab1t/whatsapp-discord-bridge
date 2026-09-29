@@ -174,10 +174,16 @@ export class Discord {
   }
 
   async control(content, files) {
+    return this.controlMessage(content, files);
+  }
+
+  /** Same as control(), but returns the sent message so callers can replace it. */
+  async controlMessage(content, files) {
     try {
-      await this.controlChannel.send({ content, files });
+      return await this.controlChannel.send({ content, files });
     } catch (err) {
       logger.error({ err }, 'failed posting to control channel');
+      return null;
     }
   }
 

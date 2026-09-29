@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { rmSync } from 'node:fs';
-import makeWASocket, {
+// Baileys 6.17 turned its default export into an object, so makeWASocket has
+// to be imported by name. Importing it as the default silently yields a
+// non-callable object.
+import {
+  makeWASocket,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
@@ -35,6 +39,8 @@ export class WhatsApp extends EventEmitter {
     this.backoffMs = 1000;
     this.connectedAt = null;
     this.groupNameCache = new Map();
+    this.pairNumber = config.pairNumber;
+    this.pairingCode = null;
     // WhatsApp LID -> phone jid, learned from message keys as they arrive and
     // persisted, so a restart does not re-learn from scratch.
     this.lidMap = new Map(lidStore.all().map((r) => [r.lid, r.wa_jid]));
@@ -61,6 +67,12 @@ export class WhatsApp extends EventEmitter {
       generateHighQualityLinkPreview: true,
     });
 
+    // Pairing by code beats a QR over a remote shell: nothing to photograph,
+    // and no 20-second expiry race.
+    if (this.pairNumber && !this.sock.authState.creds.registered) {
+      setTimeout(() => this.#requestPairingCode(), 4000);
+    }
+
     this.sock.ev.on('creds.update', saveCreds);
     this.sock.ev.on('connection.update', (u) => this.#onConnectionUpdate(u));
     this.sock.ev.on('messages.upsert', (u) => this.#onUpsert(u));
@@ -76,6 +88,37 @@ export class WhatsApp extends EventEmitter {
     this.sock.ev.on('messaging-history.set', ({ contacts: cs = [], chats: chs = [] }) => {
       this.#onContacts([...cs, ...chs]);
     });
+  }
+
+  async #requestPairingCode() {
+    try {
+      const code = await this.sock.requestPairingCode(this.pairNumber);
+      this.pairingCode = code;
+      logger.info(`pairing code for +${this.pairNumber}: ${code}`);
+      this.emit('pairing-code', code, this.pairNumber);
+    } catch (err) {
+      logger.error({ err: err.message }, 'could not get a pairing code');
+      this.emit('status', 'closed', `Pairing code request failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * Start a fresh link using a pairing code. Drops the stored credentials, so
+   * the reconnect registers from scratch.
+   */
+  async startPairing(phoneDigits) {
+    this.pairNumber = String(phoneDigits).replace(/[^0-9]/g, '');
+    this.pairingCode = null;
+    try {
+      this.sock?.end(new Error('re-pairing'));
+    } catch {
+      /* the close handler schedules the restart */
+    }
+    rmSync(config.authDir, { recursive: true, force: true });
+    this.directorySynced = false;
+    setTimeout(() => {
+      this.start().catch((err) => logger.error({ err }, 'pairing restart failed'));
+    }, 1000);
   }
 
   /**

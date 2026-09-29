@@ -24,18 +24,39 @@ async function main() {
 
   const wa = new WhatsApp();
 
+  // Baileys emits a new QR every ~20 seconds. Posting each one buries the live
+  // code under dead ones, and scanning a dead code hangs the phone forever, so
+  // only the newest is kept.
+  let lastQrMessage = null;
   wa.on('qr', async (qr) => {
+    if (config.pairNumber) return; // pairing by code instead
     qrTerminal.generate(qr, { small: true });
-    logger.info('Scan the QR above, or the one posted to Discord.');
+    logger.info('Scan the QR above. It is replaced every ~20s - use the newest.');
     try {
       const png = await QRCode.toBuffer(qr, { width: 512, margin: 2 });
-      await discord.control(
-        'Scan this in WhatsApp → **Settings → Linked devices → Link a device**. It expires in about a minute; run `/qr` for a new one.',
+      await lastQrMessage?.delete().catch(() => {});
+      lastQrMessage = await discord.controlMessage(
+        [
+          'Scan in WhatsApp → **Settings → Linked devices → Link a device**.',
+          'This replaces itself every ~20s — always scan the newest.',
+          'Easier: set `PAIR_NUMBER` in .env and use `/pair`.',
+        ].join('\n'),
         [discord.attachment(png, 'whatsapp-qr.png')],
       );
     } catch (err) {
       logger.error({ err }, 'failed to post QR to Discord');
     }
+  });
+
+  wa.on('pairing-code', (code, number) => {
+    logger.info(`PAIRING CODE for +${number}: ${code}`);
+    discord.control(
+      [
+        `**Pairing code: \`${code}\`**`,
+        `On your phone: WhatsApp → **Settings → Linked devices → Link a device → Link with phone number instead**, then enter this code for +${number}.`,
+        'It is valid for a few minutes. Run `/pair` for a new one.',
+      ].join('\n'),
+    );
   });
 
   wa.on('status', async (state, detail) => {

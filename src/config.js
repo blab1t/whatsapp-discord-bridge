@@ -44,6 +44,11 @@ export const config = {
   // turning it off leaves /chat able to search only numbers and groups.
   syncHistory: process.env.SYNC_HISTORY !== 'false',
 
+  // Your WhatsApp number in international form, digits only (e.g. 4915123456789).
+  // When set, linking uses an 8-character pairing code you type on your phone
+  // instead of a QR, which is far easier over an SSH or browser shell.
+  pairNumber: (process.env.PAIR_NUMBER || '').replace(/[^0-9]/g, ''),
+
   controlChannelName: 'wa-control',
   categoryPrefix: 'WhatsApp',
   archivePrefix: 'Archive',

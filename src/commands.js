@@ -28,6 +28,16 @@ export const definitions = [
   new SlashCommandBuilder().setName('qr').setDescription('Post a fresh WhatsApp login QR code'),
 
   new SlashCommandBuilder()
+    .setName('pair')
+    .setDescription('Link WhatsApp with an 8-character code instead of a QR')
+    .addStringOption((o) =>
+      o
+        .setName('number')
+        .setDescription('Your WhatsApp number, international, digits only (e.g. 4915123456789)')
+        .setRequired(false),
+    ),
+
+  new SlashCommandBuilder()
     .setName('chat')
     .setDescription('Search your WhatsApp contacts and groups, and open that chat')
     .addStringOption((o) =>
@@ -181,6 +191,29 @@ async function handle(interaction, { wa, discord }) {
     case 'qr': {
       await interaction.reply(ephemeral(`Requesting a fresh QR — it will appear in #${config.controlChannelName}.`));
       wa.requestQr();
+      return undefined;
+    }
+
+    case 'pair': {
+      const digits = (interaction.options.getString('number') || config.pairNumber || '').replace(
+        /[^0-9]/g,
+        '',
+      );
+      if (digits.length < 8 || digits.length > 15) {
+        return interaction.reply(
+          ephemeral(
+            'Give your WhatsApp number in international form, digits only, e.g. `/pair number:4915123456789`.',
+          ),
+        );
+      }
+      await interaction.reply(
+        ephemeral(
+          `Re-linking +${digits}. The code will appear in #${config.controlChannelName} in a few seconds.
+` +
+            'This drops the current WhatsApp session.',
+        ),
+      );
+      await wa.startPairing(digits);
       return undefined;
     }
 
