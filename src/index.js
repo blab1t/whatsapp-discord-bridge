@@ -16,6 +16,7 @@ const STATUS_TEXT = {
   closed: '🟠 Disconnected — reconnecting.',
   'logged-out': '🔴 Logged out. Scan the QR below to relink.',
   conflict: '🔴 Another copy of the bridge is running with this WhatsApp session. Stop it, then restart this one.',
+  refused: '🔴 WhatsApp refused to link this device.',
 };
 
 async function main() {

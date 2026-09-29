@@ -41,6 +41,8 @@ export class WhatsApp extends EventEmitter {
     this.groupNameCache = new Map();
     this.pairNumber = config.pairNumber;
     this.pairingCode = null;
+    this.everOpened = false;
+    this.registrationRefusals = 0;
     // WhatsApp LID -> phone jid, learned from message keys as they arrive and
     // persisted, so a restart does not re-learn from scratch.
     this.lidMap = new Map(lidStore.all().map((r) => [r.lid, r.wa_jid]));
@@ -109,6 +111,8 @@ export class WhatsApp extends EventEmitter {
   async startPairing(phoneDigits) {
     this.pairNumber = String(phoneDigits).replace(/[^0-9]/g, '');
     this.pairingCode = null;
+    this.everOpened = false;
+    this.registrationRefusals = 0;
     try {
       this.sock?.end(new Error('re-pairing'));
     } catch {
@@ -230,6 +234,8 @@ export class WhatsApp extends EventEmitter {
       this.state = 'open';
       this.connectedAt = Date.now();
       this.backoffMs = 1000;
+      this.everOpened = true;
+      this.registrationRefusals = 0;
       this.emit('status', 'open');
       if (!this.directorySynced) {
         this.directorySynced = true;
@@ -241,11 +247,36 @@ export class WhatsApp extends EventEmitter {
     if (connection !== 'close') return;
 
     const code = lastDisconnect?.error?.output?.statusCode;
-    if (code === DisconnectReason.loggedOut) {
+    const failureData = lastDisconnect?.error?.data;
+    logger.warn(
+      { code, data: failureData, message: lastDisconnect?.error?.message },
+      'whatsapp connection closed',
+    );
+
+    // A 401 means two very different things depending on whether we ever got
+    // in. After a successful session it is a real logout from the phone. Before
+    // one, it is WhatsApp REFUSING to register this device — and retrying that
+    // in a loop is what gets an account temporarily barred from linking.
+    if (code === DisconnectReason.loggedOut && !this.everOpened) {
+      this.registrationRefusals += 1;
+      this.state = 'refused';
+      if (this.registrationRefusals >= 2) {
+        this.emit(
+          'status',
+          'refused',
+          'WhatsApp refused to link this device (401), twice. Not retrying — each attempt makes a ' +
+            'temporary link block worse. On your phone: WhatsApp → Settings → Linked devices, remove ' +
+            'every entry, wait ~1 hour, then run /pair.',
+        );
+        return;
+      }
+      this.emit('status', 'refused', `WhatsApp refused the link (401). Attempt ${this.registrationRefusals}.`);
+    } else if (code === DisconnectReason.loggedOut) {
       // The session was invalidated on the phone. Credentials are useless now;
       // clearing them is what lets the next start() produce a fresh QR.
       this.state = 'logged-out';
       rmSync(config.authDir, { recursive: true, force: true });
+      this.everOpened = false;
       this.emit('status', 'logged-out', 'Session ended on the phone. Scan the new QR to reconnect.');
     } else {
       this.state = 'closed';
